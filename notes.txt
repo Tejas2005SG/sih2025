@@ -1,0 +1,471 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from 'react-query';
+import { Toaster } from 'react-hot-toast';
+import { useAuthStore } from './stores/authStore';
+
+// Components and Pages
+import AuthProvider from './components/common/AuthProvider';
+import ProtectedRoute from './components/common/ProtectedRoute';
+import PublicRoute from './components/common/PublicRoute';
+
+// Dashboard Layouts
+import DashboardLayout from './components/dashboard/DashboardLayout';
+import HospitalDashboardLayout from './pages/dashboard/HospitalDashboard/HospitalDashboardLayout';
+import DoctorDashboardLayout from './pages/dashboard/DoctorDashboard/DoctorDashboardLayout';
+
+// Dashboard Components
+import WelcomeSection from './components/dashboard/WelcomeSection';
+import QuickStats from './components/dashboard/QuickStats';
+import RecentActivity from './components/dashboard/RecentActivity';
+import WellnessJourney from './components/dashboard/WellnessJourney';
+import DoshaProfile from './components/dashboard/DoshaProfile';
+import HospitalDashboard from './pages/dashboard/HospitalDashboard/HospitalDashboard';
+import DoctorDashboard from './pages/dashboard/DoctorDashboard/DocotrDashboard';
+
+// Patient Pages
+import Login from './pages/auth/Login';
+import Register from './pages/auth/Register';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
+
+// Hospital Pages
+import HospitalLogin from './pages/auth/HospitalLogin';
+import HospitalRegister from './pages/auth/HospitalRegister';
+
+// Doctor Pages
+import DoctorLogin from './pages/auth/DoctorLogin';
+
+// Common Pages
+import NotFound from './pages/NotFound';
+import HomePage from './pages/Homepage/Homepage';
+import RoleSelection from './components/common/RoleSelection';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000,
+    },  
+  },
+});
+
+// Main Dashboard Component (Patient)
+const Dashboard = () => {
+  return (
+    <div className="space-y-8">
+      <WelcomeSection />
+      <QuickStats />
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <div className="xl:col-span-2 space-y-8">
+          <RecentActivity />
+        </div>
+        <div className="space-y-8">
+          {/* Quick Actions Card */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+            <div className="space-y-3">
+              <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors duration-200">
+                <div className="flex items-center space-x-3">
+                  <span className="text-2xl">📅</span>
+                  <div>
+                    <div className="font-medium text-gray-900">Book Appointment</div>
+                    <div className="text-sm text-gray-600">Schedule a consultation</div>
+                  </div>
+                </div>
+              </button>
+              
+              <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors duration-200">
+                <div className="flex items-center space-x-3">
+                  <span className="text-2xl">💊</span>
+                  <div>
+                    <div className="font-medium text-gray-900">View Prescriptions</div>
+                    <div className="text-sm text-gray-600">Check current medications</div>
+                  </div>
+                </div>
+              </button>
+              
+              <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors duration-200">
+                <div className="flex items-center space-x-3">
+                  <span className="text-2xl">📊</span>
+                  <div>
+                    <div className="font-medium text-gray-900">Health Reports</div>
+                    <div className="text-sm text-gray-600">View latest reports</div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Health Tips Card */}
+          <div className="bg-gradient-to-br from-green-50 to-blue-50 rounded-xl border border-green-200 p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">💡 Today's Health Tip</h3>
+            <div className="space-y-3">
+              <p className="text-sm text-gray-700">
+                <strong>Morning Ritual:</strong> Start your day with warm water mixed with lemon and a pinch of ginger. This helps stimulate your digestive fire (Agni) and balances all three doshas.
+              </p>
+              <div className="bg-white bg-opacity-50 rounded-lg p-3">
+                <p className="text-xs text-gray-600">
+                  <strong>Why it works:</strong> Warm water aids circulation, lemon provides vitamin C and aids detox, while ginger boosts metabolism and digestion.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Role-based Dashboard Router
+const RoleBasedDashboard = () => {
+  const { user } = useAuthStore();
+  
+  // if (!user) {
+  //   return <Navigate to="/auth/select-role" replace />;
+  // }
+
+  // Redirect to appropriate dashboard based on role
+  switch (user.role) {
+    case 'patient':
+      return <Dashboard />;
+    case 'hospital':
+      return <Navigate to="/hospital/dashboard" replace />;
+    case 'doctor':
+      return <Navigate to="/doctor/dashboard" replace />;
+    default:
+      return <Navigate to="/auth/select-role" replace />;
+  }
+};
+
+// Page components for different roles
+const ProfilePage = () => {
+  const { user } = useAuthStore();
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">Profile</h1>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+            <p className="text-gray-900">{user?.firstName} {user?.lastName}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+            <p className="text-gray-900">{user?.email}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
+            <p className="text-gray-900 capitalize">{user?.role}</p>
+          </div>
+          {user?.role === 'patient' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Primary Dosha</label>
+              <p className="text-gray-900">{user?.doshaAssessment?.primaryDosha || 'Not assessed'}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AppointmentsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Appointments</h1>
+      <p className="text-gray-600">Your appointment management will be displayed here.</p>
+    </div>
+  </div>
+);
+
+const MedicalRecordsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Medical Records</h1>
+      <p className="text-gray-600">Your medical records will be displayed here.</p>
+    </div>
+  </div>
+);
+
+const PrescriptionsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Prescriptions</h1>
+      <p className="text-gray-600">Your prescriptions will be displayed here.</p>
+    </div>
+  </div>
+);
+
+const HealthReportsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Health Reports</h1>
+      <p className="text-gray-600">Your health reports will be displayed here.</p>
+    </div>
+  </div>
+);
+
+const SettingsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Settings</h1>
+      <p className="text-gray-600">Your account settings will be displayed here.</p>
+    </div>
+  </div>
+);
+
+// Placeholder components for hospital routes
+const HospitalDoctorsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Doctors Management</h1>
+      <p className="text-gray-600">Manage your hospital's doctors and staff here.</p>
+    </div>
+  </div>
+);
+
+const HospitalPatientsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Patients Management</h1>
+      <p className="text-gray-600">View and manage patient records here.</p>
+    </div>
+  </div>
+);
+
+const HospitalAppointmentsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Appointments Management</h1>
+      <p className="text-gray-600">Manage hospital appointments and schedules here.</p>
+    </div>
+  </div>
+);
+
+// Placeholder components for doctor routes
+const DoctorAppointmentsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">My Appointments</h1>
+      <p className="text-gray-600">View and manage your appointments here.</p>
+    </div>
+  </div>
+);
+
+const DoctorPatientsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">My Patients</h1>
+      <p className="text-gray-600">View your patient list and medical records here.</p>
+    </div>
+  </div>
+);
+
+const DoctorConsultationsPage = () => (
+  <div className="space-y-6">
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Consultations</h1>
+      <p className="text-gray-600">Manage your consultation sessions here.</p>
+    </div>
+  </div>
+);
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Router>
+        <AuthProvider>
+          <div className="min-h-screen bg-gray-50">
+            <Routes>
+              {/* Public home page route */}
+              <Route path="/" element={<HomePage />} />
+
+              {/* Role selection route */}
+              <Route 
+                path="/auth/select-role" 
+                element={
+                  <PublicRoute>
+                    <RoleSelection />
+                  </PublicRoute>
+                } 
+              />
+
+              {/* Patient auth routes */}
+              <Route 
+                path="/auth/patient/login" 
+                element={
+                  <PublicRoute>
+                    <Login />
+                  </PublicRoute>
+                } 
+              />
+              <Route 
+                path="/auth/patient/register/*" 
+                element={
+                  <PublicRoute>
+                    <Register />
+                  </PublicRoute>
+                } 
+              />
+
+              {/* Hospital auth routes */}
+              <Route 
+                path="/auth/hospital/login" 
+                element={
+                  <PublicRoute>
+                    <HospitalLogin />
+                  </PublicRoute>
+                } 
+              />
+              <Route 
+                path="/auth/hospital/register" 
+                element={
+                  <PublicRoute>
+                    <HospitalRegister />
+                  </PublicRoute>
+                } 
+              />
+
+              {/* Doctor auth routes */}
+              <Route 
+                path="/auth/doctor/login" 
+                element={
+                  <PublicRoute>
+                    <DoctorLogin />
+                  </PublicRoute>
+                } 
+              />
+
+              {/* Legacy routes (redirect to role selection) */}
+              <Route path="/login" element={<Navigate to="/auth/select-role" replace />} />
+              <Route path="/register" element={<Navigate to="/auth/select-role" replace />} />
+              
+              {/* Password reset routes */}
+              <Route 
+                path="/forgot-password" 
+                element={
+                  <PublicRoute>
+                    <ForgotPasswordPage />
+                  </PublicRoute>
+                } 
+              />
+              <Route 
+                path="/reset-password" 
+                element={
+                  <PublicRoute>
+                    <ResetPasswordPage />
+                  </PublicRoute>
+                } 
+              />
+
+              {/* Protected patient dashboard routes */}
+              <Route 
+                path="/dashboard" 
+                element={
+                  <ProtectedRoute allowedRoles={['patient']}>
+                    <DashboardLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route index element={<RoleBasedDashboard />} />
+                <Route path="profile" element={<ProfilePage />} />
+                <Route path="appointments" element={<AppointmentsPage />} />
+                <Route path="medical-records" element={<MedicalRecordsPage />} />
+                <Route path="dosha-profile" element={<DoshaProfile />} />
+                <Route path="wellness" element={<WellnessJourney />} />
+                <Route path="prescriptions" element={<PrescriptionsPage />} />
+                <Route path="reports" element={<HealthReportsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
+
+              {/* Protected hospital dashboard routes */}
+              <Route 
+                path="/hospital/*" 
+                element={
+                  <ProtectedRoute allowedRoles={['hospital']}>
+                    <HospitalDashboardLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route path="dashboard" element={<HospitalDashboard />} />
+                <Route path="doctors" element={<HospitalDoctorsPage />} />
+                <Route path="patients" element={<HospitalPatientsPage />} />
+                <Route path="appointments" element={<HospitalAppointmentsPage />} />
+                <Route path="staff" element={<div className="p-8"><h1 className="text-2xl font-bold">Staff Management</h1></div>} />
+                <Route path="reports" element={<div className="p-8"><h1 className="text-2xl font-bold">Hospital Reports</h1></div>} />
+                <Route path="records" element={<div className="p-8"><h1 className="text-2xl font-bold">Medical Records</h1></div>} />
+                <Route path="analytics" element={<div className="p-8"><h1 className="text-2xl font-bold">Hospital Analytics</h1></div>} />
+                <Route path="settings" element={<div className="p-8"><h1 className="text-2xl font-bold">Hospital Settings</h1></div>} />
+              </Route>
+
+              {/* Protected doctor dashboard routes */}
+              <Route 
+                path="/doctor/*" 
+                element={
+                  <ProtectedRoute allowedRoles={['doctor']}>
+                    <DoctorDashboardLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route path="dashboard" element={<DoctorDashboard />} />
+                <Route path="appointments" element={<DoctorAppointmentsPage />} />
+                <Route path="patients" element={<DoctorPatientsPage />} />
+                <Route path="consultations" element={<DoctorConsultationsPage />} />
+                <Route path="prescriptions" element={<div className="p-8"><h1 className="text-2xl font-bold">Prescriptions</h1></div>} />
+                <Route path="records" element={<div className="p-8"><h1 className="text-2xl font-bold">Medical Records</h1></div>} />
+                <Route path="schedule" element={<div className="p-8"><h1 className="text-2xl font-bold">My Schedule</h1></div>} />
+                <Route path="analytics" element={<div className="p-8"><h1 className="text-2xl font-bold">Practice Analytics</h1></div>} />
+                <Route path="profile" element={<div className="p-8"><h1 className="text-2xl font-bold">Doctor Profile</h1></div>} />
+                <Route path="settings" element={<div className="p-8"><h1 className="text-2xl font-bold">Settings</h1></div>} />
+              </Route>
+
+              {/* Redirect authenticated users from root to appropriate dashboard */}
+              <Route 
+                path="/home" 
+                element={
+                  <ProtectedRoute>
+                    <RoleBasedDashboard />
+                  </ProtectedRoute>
+                } 
+              />
+
+              {/* 404 page */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+
+            <Toaster
+              position="top-right"
+              toastOptions={{
+                duration: 4000,
+                style: {
+                  background: '#ffffff',
+                  color: '#111827',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                },
+                success: {
+                  iconTheme: {
+                    primary: '#10b981',
+                    secondary: '#ffffff',
+                  },
+                },
+                error: {
+                  iconTheme: {
+                    primary: '#ef4444',
+                    secondary: '#ffffff',
+                  },
+                },
+              }}
+            />
+          </div>
+        </AuthProvider>
+      </Router>
+    </QueryClientProvider>
+  );
+}
+
+export default App;
