@@ -125,31 +125,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Root route
-app.get('/', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'AyurSutra Wellness API Server',
-    version: '1.0.0',
-    documentation: '/api/health',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// Health Check Route (before auth routes for quick access)
-app.get('/api/health', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'Server is running',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
-    cors: {
-      allowedOrigins,
-      requestOrigin: req.headers.origin || 'none',
-    },
-  });
-});
-
 
 
 // Routes
@@ -157,109 +132,8 @@ app.use('/api/auth', authRoutes);
 // app.use('/api/hospital', HospitalRoutes); // Placeholder for hospital routes
 
 
-// Add a test endpoint for CORS debugging
-if (process.env.NODE_ENV === 'development') {
-  app.get('/api/test-cors', (req, res) => {
-    res.json({
-      success: true,
-      message: 'CORS test successful',
-      origin: req.headers.origin,
-      userAgent: req.headers['user-agent'],
-      timestamp: new Date().toISOString(),
-    });
-  });
-  
-  app.post('/api/test-cors', (req, res) => {
-    res.json({
-      success: true,
-      message: 'CORS POST test successful',
-      body: req.body,
-      origin: req.headers.origin,
-      timestamp: new Date().toISOString(),
-    });
-  });
-}
 
-// 404 handler
-app.use((req, res) => {
-  console.log(`❌ 404 - Route not found: ${req.method} ${req.path}`);
-  res.status(404).json({
-    success: false,
-    message: `Route not found: ${req.method} ${req.path}`,
-    timestamp: new Date().toISOString(),
-  });
-});
 
-// Global Error Handler
-app.use((err, req, res, next) => {
-  console.error('❌ Global Error Handler:');
-  console.error('Error Message:', err.message);
-  console.error('Error Stack:', err.stack);
-  console.error('Request:', {
-    method: req.method,
-    path: req.path,
-    origin: req.headers.origin,
-    userAgent: req.headers['user-agent'],
-  });
-  
-  // CORS error
-  if (err.message && err.message.includes('CORS')) {
-    return res.status(403).json({
-      success: false,
-      message: 'CORS policy violation',
-      error: 'Origin not allowed',
-      allowedOrigins: process.env.NODE_ENV === 'development' ? allowedOrigins : undefined,
-    });
-  }
-  
-  // JWT/Auth errors
-  if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid token',
-    });
-  }
-  
-  if (err.name === 'TokenExpiredError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Token expired',
-    });
-  }
-  
-  // Validation errors
-  if (err.name === 'ValidationError') {
-    return res.status(400).json({
-      success: false,
-      message: 'Validation error',
-      errors: Object.values(err.errors).map(e => e.message),
-    });
-  }
-  
-  // Default error response
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { 
-      stack: err.stack,
-      details: {
-        name: err.name,
-        code: err.code,
-      }
-    }),
-  });
-});
-
-// Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('🛑 SIGINT received, shutting down gracefully');
-  process.exit(0);
-});
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);

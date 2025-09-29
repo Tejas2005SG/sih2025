@@ -134,6 +134,12 @@ router.post('/reset-password', authMiddleware.passwordResetLimiter, resetPasswor
 // Biometric Routes (patient-only protected)
 router.post('/register-biometric', authMiddleware.authenticateToken, authMiddleware.requireRole(['patient']), authMiddleware.requirePhoneVerification, authMiddleware.validateRequired(['credentialId', 'publicKey', 'deviceType']), bind(authController.registerBiometric));
 
+router.get(
+  '/registration-stats',
+  authMiddleware.authenticateToken,
+  bind(authController.getRegistrationStats)
+);
+
 // Test Routes (Development only)
 if (process.env.NODE_ENV === 'development') {
   router.get('/test', (req, res) => {

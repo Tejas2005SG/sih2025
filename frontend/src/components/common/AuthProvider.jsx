@@ -4,19 +4,27 @@ import { useAuthStore } from '../../stores/authStore.js';
 import { LoadingScreen } from './Loader';
 
 const AuthProvider = ({ children }) => {
-  const { checkAuthStatus, isInitialized } = useAuthStore();
+  const { checkAuthStatus, isInitialized, isLoading } = useAuthStore();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Run synchronous auth check
-    checkAuthStatus();
+    console.log('AuthProvider: Initializing auth check');
+    
+    // Check auth status only once when component mounts
+    if (!isInitialized && !isLoading) {
+      checkAuthStatus();
+    }
+    
     setMounted(true);
-  }, []);
+  }, [checkAuthStatus, isInitialized, isLoading]);
 
+  // Show loading while mounting or auth is being checked
   if (!mounted || !isInitialized) {
+    console.log('AuthProvider: Showing loading screen', { mounted, isInitialized });
     return <LoadingScreen />;
   }
 
+  console.log('AuthProvider: Auth initialized, rendering children');
   return children;
 };
 

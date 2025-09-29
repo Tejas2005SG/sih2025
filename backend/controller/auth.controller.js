@@ -1741,7 +1741,455 @@ class AuthController {
         message: 'Biometric login failed',
       });
     }
+  } 
+
+  // Registration Stats (per-user summary or aggregated)
+async getRegistrationStats(req, res) {
+  try {
+    const scope = (req.query.scope || 'me').toLowerCase();
+    const email = req.query.email?.toLowerCase();
+    const patientId = req.query.patientId;
+    const role = req.user?.role || 'patient';
+
+    // Helper funcs
+    const stepToProgress = (step) => {
+      switch (step) {
+        case 'personal-info': return 25;
+        case 'medical-history': return 50;
+        case 'dosha-assessment': return 75;
+        case 'sms-verification': return 90;
+        case 'completed': return 100;
+        default: return 0;
+      }
+    };
+
+    const countTrueFlags = (obj) => {
+      if (!obj || typeof obj !== 'object') return 0;
+      return Object.values(obj).filter((v) => v === true).length;
+    };
+
+    const arrLen = (arr) => Array.isArray(arr) ? arr.length : 0;
+
+    const sumArrayLens = (obj) => {
+      if (!obj || typeof obj !== 'object') return 0;
+      const keys = ['food', 'drug', 'environmental', 'seasonal', 'other'];
+      return keys.reduce((sum, k) => sum + arrLen(obj[k]), 0);
+    };
+
+    // SCOPE: me — return a single user's “registration stats” summary
+    if (scope === 'me') {
+      let patient = null;
+
+      if (patientId) {
+        patient = await Patient.findById(patientId).lean();
+      } else if (email) {
+        patient = await Patient.findOne({ email }).lean();
+      } else if (req.user?.id) {
+        patient = await Patient.findById(req.user.id).lean();
+      }
+
+      if (!patient) {
+        return res.status(404).json({ success: false, message: 'Patient not found' });
+      }
+
+      const now = new Date();
+      const age = patient.dateOfBirth
+        ? Math.floor((now - new Date(patient.dateOfBirth)) / (365.25 * 24 * 60 * 60 * 1000))
+        : null;
+
+      const wellnessJourneyDays = patient.createdAt
+        ? Math.max(0, Math.floor((now - new Date(patient.createdAt)) / (24 * 60 * 60 * 1000)))
+        : 0;
+
+      // Simple heuristic score (tweak as needed)
+      const healthScore = (() => {
+        let score = 85;
+        score -= Math.min(40, countTrueFlags(patient.chronicConditions) * 8);
+
+        const stress = patient.lifestyle?.stress?.level;
+        if (stress === 'High') score -= 10;
+        else if (stress === 'Moderate') score -= 5;
+
+        const sleep = patient.lifestyle?.sleep?.averageHours;
+        if (typeof sleep === 'number') {
+          if (sleep < 6) score -= 10;
+          else if (sleep < 7) score -= 5;
+          else if (sleep > 9) score -= 3;
+          else score += 3;
+        }
+
+        const exercises = patient.lifestyle?.exercise || [];
+        const hasDaily = exercises.some((e) => e?.frequency === 'Daily' || e?.frequency === '5+ times/week');
+        if (hasDaily) score += 5;
+
+        if (patient.lifestyle?.smoking?.status === 'Current') score -= 10;
+
+        return Math.max(0, Math.min(100, Math.round(score)));
+      })();
+
+      const exerciseFrequency = (() => {
+        const map = {};
+        (patient.lifestyle?.exercise || []).forEach((e) => {
+          const f = e?.frequency || 'Unknown';
+          map[f] = (map[f] || 0) + 1;
+        });
+        return map;
+      })();
+
+      const stats = {
+        personal: {
+          name: [patient.firstName, patient.lastName].filter(Boolean).join(' '),
+          age,
+          gender: patient.gender || null,
+          bloodGroup: patient.bloodGroup || null,
+          maritalStatus: patient.maritalStatus || null,
+          occupation: patient.occupation || null,
+        },
+        registrationProgress: {
+          step: patient.registrationStep || 'unknown',
+          progressPercent: stepToProgress(patient.registrationStep),
+          isCompleted: patient.registrationStep === 'completed',
+        },
+        counts: {
+          currentHealthConcerns: arrLen(patient.currentHealthConcerns),
+          chronicConditions: countTrueFlags(patient.chronicConditions),
+          currentMedications: arrLen(patient.currentMedications),
+          allergies: sumArrayLens(patient.allergies),
+          previousSurgeries: arrLen(patient.previousSurgeries),
+          recentHospitalizations: arrLen(patient.recentHospitalizations),
+          familyHistoryFlags: countTrueFlags(patient.familyMedicalHistory),
+        },
+        lifestyle: {
+          smoking: patient.lifestyle?.smoking?.status || 'Never',
+          alcohol: patient.lifestyle?.alcohol?.frequency || 'Never',
+          exerciseFrequency,
+          avgSleepHours: patient.lifestyle?.sleep?.averageHours ?? null,
+          sleepQuality: patient.lifestyle?.sleep?.quality ?? null,
+          stressLevel: patient.lifestyle?.stress?.level ?? null,
+        },
+        dosha: patient.doshaAssessment
+          ? {
+              primary: patient.doshaAssessment.primaryDosha,
+              secondary: patient.doshaAssessment.secondaryDosha,
+              vata: patient.doshaAssessment.vataScore,
+              pitta: patient.doshaAssessment.pittaScore,
+              kapha: patient.doshaAssessment.kaphaScore,
+            }
+          : null,
+        verification: {
+          isPhoneVerified: !!patient.isPhoneVerified,
+          isActive: !!patient.isActive,
+        },
+        healthScore,
+        wellnessJourneyDays,
+      };
+
+      return res.status(200).json({ success: true, scope: 'me', data: stats });
+    }
+
+    // SCOPE: all — return aggregates across all patients
+    if (scope === 'all') {
+      // Restrict who can see global stats (adjust roles as per your app)
+      if (!['doctor', 'hospital', 'admin'].includes(role)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Insufficient permissions to view global stats',
+        });
+      }
+
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const [result] = await Patient.aggregate([
+        {
+          $facet: {
+            totals: [
+              {
+                $group: {
+                  _id: null,
+                  totalPatients: { $sum: 1 },
+                  completedRegistrations: {
+                    $sum: { $cond: [{ $eq: ['$registrationStep', 'completed'] }, 1, 0] },
+                  },
+                  phoneVerified: { $sum: { $cond: ['$isPhoneVerified', 1, 0] } },
+                  active: { $sum: { $cond: ['$isActive', 1, 0] } },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  totalPatients: 1,
+                  completedRegistrations: 1,
+                  phoneVerified: 1,
+                  active: 1,
+                },
+              },
+            ],
+            byStep: [
+              { $group: { _id: '$registrationStep', count: { $sum: 1 } } },
+              { $project: { step: '$_id', count: 1, _id: 0 } },
+            ],
+            genderDistribution: [
+              { $group: { _id: { $ifNull: ['$gender', 'Unknown'] }, count: { $sum: 1 } } },
+              { $project: { gender: '$_id', count: 1, _id: 0 } },
+            ],
+            ageBuckets: [
+              { $match: { dateOfBirth: { $exists: true, $ne: null } } },
+              {
+                $project: {
+                  age: {
+                    $dateDiff: { start: '$dateOfBirth', end: now, unit: 'year' },
+                  },
+                },
+              },
+              {
+                $bucket: {
+                  groupBy: '$age',
+                  boundaries: [0, 18, 25, 35, 45, 55, 65, 200],
+                  default: 'Unknown',
+                  output: { count: { $sum: 1 } },
+                },
+              },
+              { $project: { range: '$_id', count: 1, _id: 0 } },
+            ],
+            bloodGroups: [
+              { $group: { _id: { $ifNull: ['$bloodGroup', 'Unknown'] }, count: { $sum: 1 } } },
+              { $project: { bloodGroup: '$_id', count: 1, _id: 0 } },
+            ],
+            doshaDistribution: [
+              {
+                $group: {
+                  _id: { $ifNull: ['$doshaAssessment.primaryDosha', 'Unknown'] },
+                  count: { $sum: 1 },
+                },
+              },
+              { $project: { dosha: '$_id', count: 1, _id: 0 } },
+            ],
+            avgDoshaScores: [
+              { $match: { 'doshaAssessment.vataScore': { $exists: true } } },
+              {
+                $group: {
+                  _id: null,
+                  avgVata: { $avg: '$doshaAssessment.vataScore' },
+                  avgPitta: { $avg: '$doshaAssessment.pittaScore' },
+                  avgKapha: { $avg: '$doshaAssessment.kaphaScore' },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  avgVata: { $round: ['$avgVata', 0] },
+                  avgPitta: { $round: ['$avgPitta', 0] },
+                  avgKapha: { $round: ['$avgKapha', 0] },
+                },
+              },
+            ],
+            chronicConditionPrevalence: [
+              {
+                $group: {
+                  _id: null,
+                  diabetes: { $sum: { $cond: [{ $eq: ['$chronicConditions.diabetes', true] }, 1, 0] } },
+                  heartDisease: { $sum: { $cond: [{ $eq: ['$chronicConditions.heartDisease', true] }, 1, 0] } },
+                  arthritis: { $sum: { $cond: [{ $eq: ['$chronicConditions.arthritis', true] }, 1, 0] } },
+                  kidneyDisease: { $sum: { $cond: [{ $eq: ['$chronicConditions.kidneyDisease', true] }, 1, 0] } },
+                  cancer: { $sum: { $cond: [{ $eq: ['$chronicConditions.cancer', true] }, 1, 0] } },
+                  thyroidDisorder: { $sum: { $cond: [{ $eq: ['$chronicConditions.thyroidDisorder', true] }, 1, 0] } },
+                  hypertension: { $sum: { $cond: [{ $eq: ['$chronicConditions.hypertension', true] }, 1, 0] } },
+                  depression: { $sum: { $cond: [{ $eq: ['$chronicConditions.depression', true] }, 1, 0] } },
+                  anxiety: { $sum: { $cond: [{ $eq: ['$chronicConditions.anxiety', true] }, 1, 0] } },
+                  otherCount: {
+                    $sum: { $size: { $ifNull: ['$chronicConditions.other', []] } },
+                  },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  diabetes: 1,
+                  heartDisease: 1,
+                  arthritis: 1,
+                  kidneyDisease: 1,
+                  cancer: 1,
+                  thyroidDisorder: 1,
+                  hypertension: 1,
+                  depression: 1,
+                  anxiety: 1,
+                  otherCount: 1,
+                },
+              },
+            ],
+            allergiesCounts: [
+              {
+                $group: {
+                  _id: null,
+                  food: { $sum: { $size: { $ifNull: ['$allergies.food', []] } } },
+                  drug: { $sum: { $size: { $ifNull: ['$allergies.drug', []] } } },
+                  environmental: { $sum: { $size: { $ifNull: ['$allergies.environmental', []] } } },
+                  seasonal: { $sum: { $size: { $ifNull: ['$allergies.seasonal', []] } } },
+                  other: { $sum: { $size: { $ifNull: ['$allergies.other', []] } } },
+                },
+              },
+              { $project: { _id: 0, food: 1, drug: 1, environmental: 1, seasonal: 1, other: 1 } },
+            ],
+            smokingStatus: [
+              {
+                $group: {
+                  _id: { $ifNull: ['$lifestyle.smoking.status', 'Unknown'] },
+                  count: { $sum: 1 },
+                },
+              },
+              { $project: { status: '$_id', count: 1, _id: 0 } },
+            ],
+            alcoholFrequency: [
+              {
+                $group: {
+                  _id: { $ifNull: ['$lifestyle.alcohol.frequency', 'Unknown'] },
+                  count: { $sum: 1 },
+                },
+              },
+              { $project: { frequency: '$_id', count: 1, _id: 0 } },
+            ],
+            exerciseFrequency: [
+              { $unwind: { path: '$lifestyle.exercise', preserveNullAndEmptyArrays: false } },
+              {
+                $group: {
+                  _id: { $ifNull: ['$lifestyle.exercise.frequency', 'Unknown'] },
+                  count: { $sum: 1 },
+                },
+              },
+              { $project: { frequency: '$_id', count: 1, _id: 0 } },
+            ],
+            sleepStats: [
+              { $match: { 'lifestyle.sleep.averageHours': { $exists: true } } },
+              {
+                $group: {
+                  _id: null,
+                  avgHours: { $avg: '$lifestyle.sleep.averageHours' },
+                  goodQuality: { $sum: { $cond: [{ $eq: ['$lifestyle.sleep.quality', 'Good'] }, 1, 0] } },
+                  poorQuality: { $sum: { $cond: [{ $eq: ['$lifestyle.sleep.quality', 'Poor'] }, 1, 0] } },
+                  normalQuality: { $sum: { $cond: [{ $eq: ['$lifestyle.sleep.quality', 'Normal'] }, 1, 0] } },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  avgHours: { $round: ['$avgHours', 1] },
+                  quality: { Good: '$goodQuality', Normal: '$normalQuality', Poor: '$poorQuality' },
+                },
+              },
+            ],
+            stressLevels: [
+              {
+                $group: {
+                  _id: { $ifNull: ['$lifestyle.stress.level', 'Unknown'] },
+                  count: { $sum: 1 },
+                },
+              },
+              { $project: { level: '$_id', count: 1, _id: 0 } },
+            ],
+            ayurvedicExperience: [
+              {
+                $group: {
+                  _id: null,
+                  experienced: { $sum: { $cond: ['$ayurvedicExperience', 1, 0] } },
+                  notExperienced: {
+                    $sum: { $cond: [{ $eq: ['$ayurvedicExperience', false] }, 1, 0] },
+                  },
+                },
+              },
+              { $project: { _id: 0, experienced: 1, notExperienced: 1 } },
+            ],
+            topHealthConcerns: [
+              { $unwind: { path: '$currentHealthConcerns', preserveNullAndEmptyArrays: false } },
+              {
+                $match: {
+                  'currentHealthConcerns.concern': { $exists: true, $ne: null, $ne: '' },
+                },
+              },
+              {
+                $group: {
+                  _id: { $toLower: '$currentHealthConcerns.concern' },
+                  count: { $sum: 1 },
+                },
+              },
+              { $sort: { count: -1 } },
+              { $limit: 10 },
+              { $project: { concern: '$_id', count: 1, _id: 0 } },
+            ],
+            topMedications: [
+              { $unwind: { path: '$currentMedications', preserveNullAndEmptyArrays: false } },
+              { $match: { 'currentMedications.name': { $exists: true, $ne: null, $ne: '' } } },
+              {
+                $group: {
+                  _id: { $toLower: '$currentMedications.name' },
+                  count: { $sum: 1 },
+                },
+              },
+              { $sort: { count: -1 } },
+              { $limit: 10 },
+              { $project: { name: '$_id', count: 1, _id: 0 } },
+            ],
+            registrationsByDay: [
+              { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+              {
+                $group: {
+                  _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                  count: { $sum: 1 },
+                },
+              },
+              { $sort: { _id: 1 } },
+              { $project: { date: '$_id', count: 1, _id: 0 } },
+            ],
+          },
+        },
+        {
+          $project: {
+            totals: { $arrayElemAt: ['$totals', 0] },
+            byStep: 1,
+            genderDistribution: 1,
+            ageBuckets: 1,
+            bloodGroups: 1,
+            doshaDistribution: 1,
+            avgDoshaScores: {
+              $ifNull: [
+                { $arrayElemAt: ['$avgDoshaScores', 0] },
+                { avgVata: 0, avgPitta: 0, avgKapha: 0 },
+              ],
+            },
+            chronicConditionPrevalence: { $arrayElemAt: ['$chronicConditionPrevalence', 0] },
+            allergiesCounts: { $arrayElemAt: ['$allergiesCounts', 0] },
+            smokingStatus: 1,
+            alcoholFrequency: 1,
+            exerciseFrequency: 1,
+            sleepStats: { $arrayElemAt: ['$sleepStats', 0] },
+            stressLevels: 1,
+            ayurvedicExperience: { $arrayElemAt: ['$ayurvedicExperience', 0] },
+            topHealthConcerns: 1,
+            topMedications: 1,
+            registrationsByDay: 1,
+          },
+        },
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        scope: 'all',
+        data: result || {},
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid scope. Use ?scope=me or ?scope=all',
+    });
+  } catch (error) {
+    console.error('Registration stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to compute registration stats',
+    });
   }
+}
 }
 
 export default new AuthController();
